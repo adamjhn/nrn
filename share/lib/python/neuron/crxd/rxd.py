@@ -994,7 +994,6 @@ def _setup_matrices():
                     s._setup_c_matrix(_linmodadd_c)
                     #print '_diffusion_matrix.shape = %r, n = %r, species._has_3d = %r' % (_diffusion_matrix.shape, n, species._has_3d)
 
-            
             # modify C for cases where no diffusive coupling of 0, 1 ends
             # TODO: is there a better way to handle no diffusion?
             for i in range(n):
@@ -1498,6 +1497,9 @@ def _init():
     initializer._do_init()
     # TODO: check about the 0<x<1 problem alluded to in the documentation
     h.define_shape()
+
+    # if the shape has changed update the nodes
+    _update_node_data()
     
     if species._has_1d:
         section1d._purge_cptrs()

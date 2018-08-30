@@ -61,6 +61,16 @@ def _allocate(num):
     _states.resize(total, refcheck=False)
     return start_index
 
+def _remove(start,stop):
+    """ delete values in from global arrays """
+    #TODO: Is this necessary as removal only happens on initialisation when nseg changes.
+    global _volumes, _surface_area, _diffs, _states
+    _volumes = numpy.delete(_volumes,list(range(start,stop)))
+    _surface_area = numpy.delete(_surface_area,list(range(start,stop)))
+    _diffs = numpy.delete(_diffs,list(range(start,stop)))
+    _states = numpy.delete(_states,list(range(start,stop)))
+
+
 _numpy_element_ref = neuron.numpy_element_ref
 
 class Node(object):

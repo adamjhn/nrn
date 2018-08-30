@@ -3,6 +3,7 @@ from neuron import h
 from . import node, rxdsection, nodelist, morphology
 import numpy
 from .rxdException import RxDException
+import warnings
 
 # all concentration ptrs and indices
 _all_cptrs = []
@@ -46,6 +47,17 @@ def _transfer_to_legacy():
         _c_ptr_vector_storage[:] = node._get_states()[_all_cindices]
         _c_ptr_vector.scatter(_c_ptr_vector_storage_nrn)
 
+def remove(rmsec):
+    """ Remove the section (rmsec) from the arrays in node and update the offsets"""
+    start = rmsec._offset
+    dur = rmsec._nseg
+    stop = start + dur
+    node._remove(start,stop)
+    for secs in _rxd_sec_lookup.values():
+        for sec in secs:
+            if sec and sec()._offset > start:
+                sec()._offset -= dur
+
 class Section1D(rxdsection.RxDSection):
     def __init__(self, species, sec, diff, r):
         self._species = weakref.ref(species)
@@ -67,12 +79,17 @@ class Section1D(rxdsection.RxDSection):
         node._diffs[self._offset : self._offset + self.nseg] = self._diff
     
     def _update_node_data(self):
+        if self._nseg != self._sec.nseg:
+            remove(self)
+            self._offset = node._allocate(self._sec.nseg + 1)
+            self._nseg = self._sec.nseg
+            self._init_diffusion_rates()
+            warnings.warn("nseg has changed, node '_ref's have not been preserved")
         volumes, surface_area, diffs = node._get_data()
         geo = self._region._geometry
         volumes[self._offset : self._offset + self.nseg] = geo.volumes1d(self)
         surface_area[self._offset : self._offset + self.nseg] = geo.surface_areas1d(self)
         self._neighbor_areas = geo.neighbor_areas1d(self)
-        
 
     @property
     def indices(self):
