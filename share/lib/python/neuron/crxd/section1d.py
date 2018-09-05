@@ -47,12 +47,13 @@ def _transfer_to_legacy():
         _c_ptr_vector_storage[:] = node._get_states()[_all_cindices]
         _c_ptr_vector.scatter(_c_ptr_vector_storage_nrn)
 
-def remove(rmsec):
-    """ Remove the section (rmsec) from the arrays in node and update the offsets"""
+def replace(rmsec, offset, nseg):
+    """ Replace the section (rmsec) in node data lists and update the offsets"""
     start = rmsec._offset
     dur = rmsec._nseg
-    stop = start + dur
-    node._remove(start,stop)
+    node._replace(start, rmsec._nseg, offset, nseg)
+    rmsec._offset = offset
+    rmsec._nseg = nseg
     for secs in _rxd_sec_lookup.values():
         for sec in secs:
             if sec and sec()._offset > start:
@@ -80,15 +81,12 @@ class Section1D(rxdsection.RxDSection):
     
     def _update_node_data(self):
         if self._nseg != self._sec.nseg:
-            remove(self)
-            self._offset = node._allocate(self._sec.nseg + 1)
-            self._nseg = self._sec.nseg
-            self._init_diffusion_rates()
-            warnings.warn("nseg has changed, node '_ref's have not been preserved")
+            offset = node._allocate(self._sec.nseg + 1)
+            replace(self, offset, self._sec.nseg)
         volumes, surface_area, diffs = node._get_data()
         geo = self._region._geometry
-        volumes[self._offset : self._offset + self.nseg] = geo.volumes1d(self)
-        surface_area[self._offset : self._offset + self.nseg] = geo.surface_areas1d(self)
+        volumes[self._offset : self._offset + self._nseg] = geo.volumes1d(self)
+        surface_area[self._offset : self._offset + self._nseg] = geo.surface_areas1d(self)
         self._neighbor_areas = geo.neighbor_areas1d(self)
 
     @property

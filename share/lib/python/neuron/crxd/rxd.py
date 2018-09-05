@@ -940,6 +940,9 @@ def _setup_matrices():
 
     # TODO: this sometimes seems to get called twice. Figure out why and fix, if possible.
 
+    # if the shape has changed update the nodes
+    _update_node_data()
+
     n = len(_node_get_states())
         
     if species._has_3d:
@@ -1518,8 +1521,9 @@ def _init():
 
 _has_nbs_registered = False
 _nbs = None
+do_setup_matrices_fptr = None
 def _do_nbs_register():
-    global _has_nbs_registered, _nbs, _fih, _fih2
+    global _has_nbs_registered, _nbs, _fih, _fih2, do_setup_matrices_fptr
     
     if not _has_nbs_registered:
         #from neuron import nonvint_block_supervisor as _nbs
@@ -1534,6 +1538,7 @@ def _do_nbs_register():
         set_setup_matrices = nrn_dll_sym('set_setup_matrices')
         set_setup_matrices.argtypes = [fptr_prototype]
         do_setup_matrices_fptr = fptr_prototype(_setup_matrices)
+        set_setup_matrices(do_setup_matrices_fptr)
 
         _fih2 = h.FInitializeHandler(3, initializer._do_ion_register)
 

@@ -11,6 +11,8 @@
 #include <../nrnoc/multicore.h>
 #include <nrnwrap_Python.h>
 
+extern int structure_change_cnt;
+int prev_structure_change_cnt;
 
 /*
     Globals
@@ -128,6 +130,7 @@ static void transfer_to_legacy()
 void rxd_set_no_diffusion()
 {
     int i;
+    prev_structure_change_cnt = structure_change_cnt;
     diffusion = FALSE;
     /*Clear previous _rxd_zvi_child*/
     if(_rxd_zvi_child != NULL && _rxd_zvi_child_count != NULL)
@@ -200,6 +203,7 @@ void rxd_set_euler_matrix(int nrow, int nnonzero, long* nonzero_i,
                           double* c_diagonal)
 {
     long i, j;
+    prev_structure_change_cnt = structure_change_cnt;
     diffusion = TRUE;  
     /* TODO: is it better to use a pointer or do a copy */
 	_rxd_euler_nrow = nrow;
@@ -600,8 +604,12 @@ static void _currents(double* rhs)
 }
 
 int rxd_nonvint_block(int method, int size, double* p1, double* p2, int thread_id) {
-    //fprintf(stderr,"nonvint_block  method = %d l=%d t=%g dt=%g p1=%p p2=%p offset=%i num_states=%i\n",method,size, *t_ptr, *dt_ptr, p1, p2, _cvode_offset, num_states);
-    switch (method) {
+        if(method > 1 && structure_change_cnt != prev_structure_change_cnt)
+        {
+            /*TODO: Exclude irrelevant (non-rxd) structural changes*/
+            _setup_matrices();
+        }
+        switch (method) {
         case 0:
             _setup();
             break;
