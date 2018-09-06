@@ -12,7 +12,8 @@
 #include <nrnwrap_Python.h>
 
 extern int structure_change_cnt;
-int prev_structure_change_cnt;
+int prev_structure_change_cnt = 0;
+unsigned char initialized = 0;
 
 /*
     Globals
@@ -131,6 +132,7 @@ void rxd_set_no_diffusion()
 {
     int i;
     prev_structure_change_cnt = structure_change_cnt;
+    initialized = 1;
     diffusion = FALSE;
     /*Clear previous _rxd_zvi_child*/
     if(_rxd_zvi_child != NULL && _rxd_zvi_child_count != NULL)
@@ -204,6 +206,7 @@ void rxd_set_euler_matrix(int nrow, int nnonzero, long* nonzero_i,
 {
     long i, j;
     prev_structure_change_cnt = structure_change_cnt;
+    initialized = 1;
     diffusion = TRUE;  
     /* TODO: is it better to use a pointer or do a copy */
 	_rxd_euler_nrow = nrow;
@@ -604,7 +607,7 @@ static void _currents(double* rhs)
 }
 
 int rxd_nonvint_block(int method, int size, double* p1, double* p2, int thread_id) {
-        if(method > 1 && structure_change_cnt != prev_structure_change_cnt)
+        if(initialized && structure_change_cnt != prev_structure_change_cnt)
         {
             /*TODO: Exclude irrelevant (non-rxd) structural changes*/
             _setup_matrices();
