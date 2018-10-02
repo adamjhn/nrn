@@ -1247,7 +1247,7 @@ def _compile_reactions():
             react_regions = [s()._extracellular()._region for s in r._sources + r._dests if isinstance(s(),species.SpeciesOnExtracellular)] + [s()._region() for s in r._sources + r._dests if not isinstance(s(),species.SpeciesOnExtracellular)]
             react_regions +=  [sptr()._region() for sptr in sptrs if isinstance(sptr(),species.SpeciesOnRegion)]
         #if regions are specified - use those
-        elif None not in r._regions:
+        elif None not in r._regions and hasattr(r,'_active_regions'):
             react_regions = r._active_regions
         #Otherwise use all the regions where the species are
         else:

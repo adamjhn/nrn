@@ -634,7 +634,7 @@ int rxd_nonvint_block(int method, int size, double* p1, double* p2, int thread_i
         case 5:
             /* ode_count */
             _cvode_offset = size;
-            return ode_count(size) + num_states - _rxd_num_zvi;
+            return ode_count(size + num_states - _rxd_num_zvi) + num_states - _rxd_num_zvi;
         case 6:
             /* ode_reinit(y) */
             _ode_reinit(p1); //Invalid read of size 8 
@@ -646,7 +646,7 @@ int rxd_nonvint_block(int method, int size, double* p1, double* p2, int thread_i
             _rhs_variable_step(*t_ptr, p1, p2);
             break;
         case 8:
-            //ode_solve(*t_ptr, *dt_ptr, p1, p2); /*solve mx=b replace b with x */
+            ode_solve(*t_ptr, *dt_ptr, p1, p2); /*solve mx=b replace b with x */
             /* TODO: we can probably reuse the dgadi code here... for now, we do nothing, which implicitly approximates the Jacobian as the identity matrix */
             break;
         case 9:
@@ -1333,7 +1333,7 @@ void _rhs_variable_step(const double t, const double* p1, double* p2)
 	/*variables for diffusion*/
 	double *rhs;
 	long* zvi = _rxd_zero_volume_indices;
-   
+
     /*Copy states from CVode*/ 
     if(_rxd_num_zvi > 0)
     {
@@ -1364,6 +1364,9 @@ void _rhs_variable_step(const double t, const double* p1, double* p2)
             }
         }
     }
+
+    transfer_to_legacy();
+
     if(!calculate_rhs)
     {
         for(i = 0; i < _rxd_num_zvi; i++)
