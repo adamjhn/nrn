@@ -640,7 +640,7 @@ void _rhs_variable_step_ecs(const double t, const double* states, double* ydot) 
     ydot = orig_ydot;
     states = orig_states;
     /* process currents */
-    for (i=0,grid = Parallel_grids[0]; grid != NULL; grid = grid -> next,i++)
+    for (i = 0, grid = Parallel_grids[0]; grid != NULL; grid = grid -> next, i++)
     {
         do_currents(grid, ydot, 1.0, i);
         ydot += grid_size;
@@ -700,7 +700,7 @@ static void _rhs_variable_step_helper(Grid_node* g, double const * const states,
                 k++, index++, prev_i++, next_i++, prev_j++, next_j++) {
 				div_z = (k==0||k==stop_k)?2.:1.;
 
-                ydot[index] = rate_x * (states[prev_i] -  
+                ydot[index] += rate_x * (states[prev_i] -  
                     2.0 * states[index] + states[next_i])/div_x;
 
                 ydot[index] += rate_y * (states[prev_j] - 
