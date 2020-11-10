@@ -208,6 +208,10 @@ class _SpeciesMathable(object):
             _diffs[self._indices1d()] = value
             rxd._setup_matrices()
 
+    @property
+    def _voltage_dependent(self):
+        return False
+
 class SpeciesOnExtracellular(_SpeciesMathable):
     def __init__(self, species, extracellular):
         """The restriction of a Species to a Region."""

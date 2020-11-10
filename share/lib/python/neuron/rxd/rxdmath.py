@@ -3,6 +3,7 @@ import numpy
 import functools
 import copy
 import sys
+import numbers
 from .rxdException import RxDException
 from . import initializer
 
@@ -113,9 +114,12 @@ def _compile(arith, region):
 def _ensure_arithmeticed(other):
     from . import species
     if isinstance(other, species._SpeciesMathable):
-        other = _Arithmeticed(other)
+        other = _Arithmeticed(other, voltage_dependent=False)
     elif isinstance(other, _Reaction):
         raise RxDException('Cannot do arithmetic on a reaction')
+    elif isinstance(other, numbers.Number):
+        other = _Arithmeticed(other, valid_reaction_term=False,
+                              voltage_dependent=False)
     elif not isinstance(other, _Arithmeticed):
         other = _Arithmeticed(other, valid_reaction_term=False)
     return other
@@ -134,6 +138,7 @@ class _Function:
         self._obj = _ensure_arithmeticed(obj)
         self._f = f
         self._fname = fname
+        self._voltage_dependent = self._obj._voltage_dependent
     def __repr__(self):
         return '%s(%r)' % (self._fname, self._obj)
     def _short_repr(self):
@@ -156,13 +161,6 @@ class _Function:
                 items = ecs_species
             elif hasattr(item,'_ensure_extracellular'):
                 item._ensure_extracellular(extracellular=extracellular)
-    @property
-    def _voltage_dependent(self):
-        try:
-            return self._obj._voltage_dependent
-        except AttributeError:
-            return False
-
 
 
 class _Function2:
@@ -171,6 +169,8 @@ class _Function2:
         self._obj2 = _ensure_arithmeticed(obj2)
         self._f = f
         self._fname = fname
+        self._voltage_dependent = (self._obj1._voltage_dependent or
+                                   self._obj2._voltage_dependent)
     def __repr__(self):
         return '%s(%r, %r)' % (self._fname, self._obj1, self._obj2)
     def _short_repr(self):
@@ -195,16 +195,6 @@ class _Function2:
                 elif hasattr(item,'_ensure_extracellular'):
                     item._ensure_extracellular(extracellular=extracellular)
     
-    @property
-    def _voltage_dependent(self):
-        for item in [self._obj1, self._obj2]:
-            try:
-                if item._voltage_dependent:
-                    return True
-            except AttributeError:
-                pass
-        return False
-
 
 
     
@@ -298,6 +288,8 @@ class _Product:
     def __init__(self, a, b):
         self._a = a
         self._b = b
+        self._voltage_dependent = (a._voltage_dependent or
+                                   b._voltage_dependent)
     def __repr__(self):
         return '(%r)*(%r)' % (self._a, self._b)
 
@@ -335,16 +327,6 @@ class _Product:
                 p._b = self._b._ensure_extracellular(intracellular3d=intracellular3d)
         return p
 
-    @property
-    def _voltage_dependent(self):
-        for item in [self._a, self._b]:
-            try:
-                if item._voltage_dependent:
-                    return True
-            except AttributeError:
-                pass
-        return False
-
     def _semi_compile(self, region, instruction):
         return '(%s)*(%s)' % (self._a._semi_compile(region, instruction), self._b._semi_compile(region, instruction))
 
@@ -356,6 +338,8 @@ class _Quotient:
     def __init__(self, a, b):
         self._a = a
         self._b = b
+        self._voltage_dependent = (a._voltage_dependent or
+                                   b._voltage_dependent)
     def __repr__(self):
         return '(%r)/(%r)' % (self._a, self._b)
 
@@ -386,16 +370,6 @@ class _Quotient:
 
         return q
 
-    @property
-    def _voltage_dependent(self):
-        for item in [self._a, self._b]:
-            try:
-                if item._voltage_dependent:
-                    return True
-            except AttributeError:
-                pass
-        return False
-
     def _semi_compile(self, region, instruction):
         return '(%s)/(%s)' % (self._a._semi_compile(region, instruction), self._b._semi_compile(region, instruction))
     def _involved_species(self, the_dict):
@@ -408,23 +382,15 @@ class _Reaction:
         self._lhs = lhs
         self._rhs = rhs
         self._dir = direction
+        self._voltage_dependent = (self._lhs._voltage_dependent or
+                                   self._rhs._voltage_dependent)
     def __repr__(self):
         return '%s%s%s' % (str(self._lhs), self._dir, str(self._rhs))
     def __bool__(self):
         return False
-    @property
-    def _voltage_dependent(self):
-        for item in [self._lhs, self._rhs]:
-            try:
-                if item._voltage_dependent:
-                    return True
-            except AttributeError:
-                pass
-        return False
-
 
 class _Arithmeticed:
-    def __init__(self, item, valid_reaction_term=True):
+    def __init__(self, item, valid_reaction_term=True, voltage_dependent=None):
         if isinstance(item, dict):
             self._items = dict(item)
             self._original_items = dict(item)
@@ -435,6 +401,12 @@ class _Arithmeticed:
             self._original_items = {item : 1}
         self._valid_reaction_term = valid_reaction_term
         self._compiled_form = None
+        if voltage_dependent == None:
+            self._voltage_dependent = any([item._voltage_dependent 
+                                           for item in self._items
+                                           if not isinstance(item,numbers.Number)])
+        else:
+            self._voltage_dependent = voltage_dependent
     
     def _evaluate(self, location):
         if self._compiled_form is None:
@@ -531,16 +503,6 @@ class _Arithmeticed:
         if not result:
             result = '0'
         return result
-
-    @property
-    def _voltage_dependent(self):
-        for item in self._items:
-            try:
-                if item._voltage_dependent:
-                    return True
-            except AttributeError:
-                pass
-        return False
 
     def _semi_compile(self, region, instruction):
         items = []
@@ -670,15 +632,15 @@ class Vm(_Arithmeticed, object):
     """ represent the membrane potential in rxd rates and reactions """
 
     class _Vm(object):
+        def __init__(self):
+            self._voltage_dependent=True
+
         def __repr__(self):
             return 'v'
 
-        @property
-        def _voltage_dependent(self):
-            return True
-
     def __init__(self):
-        super(Vm, self).__init__(Vm._Vm(), valid_reaction_term=True)
+        super(Vm, self).__init__(Vm._Vm(), valid_reaction_term=True,
+                                 voltage_dependent=True)
 
 v = Vm()
 
