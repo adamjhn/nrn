@@ -369,6 +369,9 @@ class _c_region:
             s = sptr()
             sid = self._species_ids[s._id]
             for r in s._regions:
+                # skip regions not local here
+                if r._id not in self._region_ids:
+                    continue
                 rid = self._region_ids[r._id]
                 flat_name = s.ast(r).get_node_name()
                 self._name_to_index[flat_name] = ("species", sid, rid)
@@ -376,6 +379,8 @@ class _c_region:
             s = sptr()
             sid = self._params_ids[s._id]
             for r in s._regions:
+                if r._id not in self._region_ids:
+                    continue
                 rid = self._region_ids[r._id]
                 flat_name = s.ast(r).get_node_name()
                 self._name_to_index[flat_name] = ("params", sid, rid)
