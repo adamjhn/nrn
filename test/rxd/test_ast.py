@@ -281,11 +281,23 @@ def test_multicompartment_reaction_ast(setup_section):
     react, species = reaction.ast()
     node = json.loads(to_json(react))
 
+    # reactants/products are ReactVarName (stoichiometry-tagged) so that
+    # KineticBlockVisitor can derive the per-species d/dt in the compile path
     ast = {
         "ReactionStatement": [
-            {"VarName": [{"Name": [{"String": [{"name": "ca_cyt_0"}]}]}]},
+            {
+                "ReactVarName": [
+                    {"Integer": [{"Name": [{"String": [{"name": "1"}]}]}]},
+                    {"VarName": [{"Name": [{"String": [{"name": "ca_cyt_0"}]}]}]},
+                ]
+            },
             {"ReactionOperator": [{"name": "<->"}]},
-            {"VarName": [{"Name": [{"String": [{"name": "ca_er_2"}]}]}]},
+            {
+                "ReactVarName": [
+                    {"Integer": [{"Name": [{"String": [{"name": "1"}]}]}]},
+                    {"VarName": [{"Name": [{"String": [{"name": "ca_er_2"}]}]}]},
+                ]
+            },
             {"Double": [{"name": "0.1"}]},
             {"Double": [{"name": "0.05"}]},
         ]

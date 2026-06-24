@@ -330,6 +330,7 @@ class _c_region:
         from . import Rate, rxd, MultiCompartmentReaction
         from .species import (
             SpeciesOnRegion,
+            Parameter,
             ParameterOnRegion,
             SpeciesOnExtracellular,
             ParameterOnExtracellular,
@@ -420,6 +421,20 @@ class _c_region:
         multicompartmentReactions = []
         states = []
         mc_flux = []
+        # global (source+dest) slot index for each MC rate statement, kept
+        # parallel to multicompartmentReactions so the merge below can index
+        # mc_flux / mult correctly (see note where it is populated)
+        mc_mult_idx = []
+        # Per-species maps used by the kinetic-block (mass-action) path, where
+        # statements are keyed by species name rather than by position:
+        #   mc_slot_by_name:  flat species name -> a representative source+dest
+        #                     slot (any occurrence; only its |mult| magnitude is
+        #                     used, which is identical across occurrences).
+        #   mc_kflux_by_name: flat species name -> (sid, rid, coeff) for membrane
+        #                     flux, where coeff = -smap*charge is the factor that
+        #                     turns the stoich-signed d/dt into the membrane flux.
+        mc_slot_by_name = {}
+        mc_kflux_by_name = {}
         mc_kinetic_blocks = []
         local_consts = {}
         for rptr, rlst in self._react_regions.items():
@@ -435,16 +450,48 @@ class _c_region:
                     else:
                         mc_rates_ast.append(react)
                 multicompartmentReactions += mc_rates_ast
+                # mc_flux and the mult[] array have one slot per source+dest
+                # (parameters and ECS species included), but r.ast() emits a rate
+                # statement only for non-parameter species (see
+                # MultiCompartmentReaction.ast). Record the global slot index of
+                # each emitted statement so the merge indexes mc_flux/mult by
+                # position rather than by a running per-statement counter, which
+                # otherwise drifts by one for every parameter source/dest and
+                # mis-attaches flux/scaling to the wrong species.
+                base = len(mc_flux)
+                n_src = len(r._sources)
                 flux = []
+                stmt_slots = []
                 for i, sp in enumerate(r._sources + r._dests):
                     s = sp()
                     if r._membrane_flux and isinstance(s, SpeciesOnRegion):
                         sid = self._species_ids[s._id]
                         rid = self._region_ids[s._region()._id]
-                        flux.append((sid, rid, r._cur_charges[i]))
+                        cur_charge = r._cur_charges[i]
+                        flux.append((sid, rid, cur_charge))
+                        # The kinetic-block flux coefficient multiplies the
+                        # stoich-signed d/dt (= stoich*rate), so it is
+                        # -smap*charge, independent of source/dest role. Recover
+                        # it from the role-signed _cur_charges (source: smap*charge,
+                        # dest: -smap*charge).
+                        kin_coeff = -cur_charge if i < n_src else cur_charge
+                        mc_kflux_by_name[s.ast().get_node_name()] = (
+                            sid,
+                            rid,
+                            kin_coeff,
+                        )
                     else:
                         flux.append(None)
+                    if not isinstance(
+                        s, (Parameter, ParameterOnRegion, ParameterOnExtracellular)
+                    ):
+                        stmt_slots.append(base + i)
+                        mc_slot_by_name.setdefault(s.ast().get_node_name(), base + i)
                 mc_flux += flux
+                # pair slots with the emitted rate statements (the mass-action /
+                # kinetic-block path produces a ReactionStatement instead; it is
+                # not handled here -- see note at parse_kinetic_block below)
+                mc_mult_idx += stmt_slots[: len(mc_rates_ast)]
             elif (
                 isinstance(rptr(), Rate)
                 or _ast_config["kinetic_block"] == "off"
@@ -471,6 +518,11 @@ class _c_region:
             rast, lc = parse_kinetic_block(reactions, blocks)
             rates += rast
             local_consts |= lc
+        # number of derivative-form MC statements; statements appended after this
+        # come from parse_kinetic_block (mass-action path) and are scaled by
+        # magnitude |mult| + (-smap*charge) flux, keyed by species name, since the
+        # kinetic visitor already bakes the stoichiometric sign into each d/dt.
+        n_deriv_mc = len(multicompartmentReactions)
         if mc_kinetic_blocks != []:
             rast, lc = parse_kinetic_block(mc_kinetic_blocks, blocks)
             multicompartmentReactions += rast
@@ -480,52 +532,84 @@ class _c_region:
             lookup = AstLookupVisitor()
             merged = {}
             constants = set()
-            mult_id = 0
+            mc_stmt = 0
+
+            def _int_or_double(c):
+                return (
+                    Integer(c, Name(String(str(c))))
+                    if isinstance(c, int)
+                    else Double(str(c))
+                )
+
+            def _add_flux(flx, frhs):
+                # accumulate a membrane-flux contribution under key `flx`
+                if flx in merged:
+                    merged[flx] = (
+                        Name(String(flx)),
+                        BinaryExpression(
+                            merged[flx][1],
+                            BinaryOperator(BinaryOp.BOP_ADDITION),
+                            frhs,
+                        ),
+                    )
+                else:
+                    merged[flx] = (Name(String(flx)), frhs)
+                constants.add(flx)
+
             for rid, stmt in enumerate(rates + multicompartmentReactions):
                 diffeq = stmt.expression
                 binexpr = diffeq.expression
                 var_name = binexpr.lhs.get_node_name()
                 rhs = ParenExpression(binexpr.rhs)
                 if rid >= len(rates):
-                    # MCR have to be multiplied by mult[]
-                    mult = Name(String(f"_mult_{mult_id}"))
-                    if mc_flux[mult_id] is not None:
-                        sid, rid, charge = mc_flux[mult_id]
-                        flx = f"_flux_{sid}_{rid}_"
-                        fast = Name(String(flx))
-                        cast = (
-                            Integer(charge, Name(String(str(charge))))
-                            if isinstance(charge, int)
-                            else Double(str(charge))
-                        )
-                        if charge == 1:
-                            frhs = rhs
-                        else:
+                    mc_idx = mc_stmt
+                    mc_stmt += 1
+                    mult = None
+                    if mc_idx < len(mc_mult_idx):
+                        # Derivative-form MC statement: the d/dt rate is unsigned,
+                        # so the signed per-occurrence mult carries the source/dest
+                        # sign and the membrane flux is charge*rate. Index
+                        # mc_flux/mult by the statement's global source+dest slot.
+                        slot = mc_mult_idx[mc_idx]
+                        mult = Name(String(f"_mult_{slot}"))
+                        constants.add(f"_mult_{slot}")
+                        if slot < len(mc_flux) and mc_flux[slot] is not None:
+                            sid, frid, charge = mc_flux[slot]
+                            if charge == 1:
+                                frhs = rhs
+                            else:
+                                frhs = BinaryExpression(
+                                    _int_or_double(charge),
+                                    BinaryOperator(BinaryOp.BOP_MULTIPLICATION),
+                                    rhs,
+                                )
+                            _add_flux(f"_flux_{sid}_{frid}_", frhs)
+                    else:
+                        # Kinetic-block (mass-action) statement: parse_kinetic_block
+                        # already merged reactions per species and baked the
+                        # stoichiometric sign into the d/dt. Scale rhs by the
+                        # magnitude |mult| (per species; identical for source and
+                        # dest) and the membrane flux by -smap*charge, both keyed
+                        # by the target species name.
+                        slot = mc_slot_by_name.get(var_name)
+                        if slot is not None:
+                            mult = Name(String(f"_absmult_{slot}"))
+                            constants.add(f"_absmult_{slot}")
+                        if var_name in mc_kflux_by_name:
+                            sid, frid, coeff = mc_kflux_by_name[var_name]
                             frhs = BinaryExpression(
-                                cast,
+                                _int_or_double(coeff),
                                 BinaryOperator(BinaryOp.BOP_MULTIPLICATION),
                                 rhs,
                             )
-                        if flx in merged:
-                            merged[flx] = (
-                                fast,
-                                BinaryExpression(
-                                    merged[flx][1],
-                                    BinaryOperator(BinaryOp.BOP_ADDITION),
-                                    frhs,
-                                ),
-                            )
-                        else:
-                            merged[flx] = (fast, frhs)
-                        constants.add(flx)
-                    # multiple by a constant to scale units
-                    rhs = BinaryExpression(
-                        mult,
-                        BinaryOperator(BinaryOp.BOP_MULTIPLICATION),
-                        rhs,
-                    )
-                    constants.add(f"_mult_{mult_id}")
-                    mult_id += 1
+                            _add_flux(f"_flux_{sid}_{frid}_", frhs)
+                    if mult is not None:
+                        # multiply by a constant to scale units
+                        rhs = BinaryExpression(
+                            mult,
+                            BinaryOperator(BinaryOp.BOP_MULTIPLICATION),
+                            rhs,
+                        )
                 if var_name in merged:
                     merged[var_name] = (
                         binexpr.lhs,

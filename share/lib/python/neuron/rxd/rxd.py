@@ -599,10 +599,13 @@ def _compile_reactions_from_ast(creg):
     def substitute_names(line):
         """Replace AST variable names with array access expressions.
         And _mult_id with mult[id] for multicompartment reactions.
+        _absmult_id -> fabs(mult[id]) (magnitude, used by the kinetic-block path
+        where the d/dt already carries the source/dest sign).
         ICS entries (3-tuple): species[sid][rid] or params[sid][rid]
         ECS entries (2-tuple): species_3d[ecs_sid] or params_3d[ecs_sid]
         """
-        result = re.sub(r"_mult_(\d+)", r"mult[\1]", line)
+        result = re.sub(r"_absmult_(\d+)", r"fabs(mult[\1])", line)
+        result = re.sub(r"_mult_(\d+)", r"mult[\1]", result)
         for name in sorted_names:
             entry = name_to_index[name]
             if len(entry) == 3:

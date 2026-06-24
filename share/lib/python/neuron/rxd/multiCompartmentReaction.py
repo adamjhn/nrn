@@ -472,10 +472,11 @@ class MultiCompartmentReaction(GeneralizedReaction):
             ):
                 species.append(sp().ast().get_node_name())
 
-        if kinetic_block == "off" or (
-            kinetic_block == "mass_action" and self._custom_dynamics
-        ):
-            # represent the reaction in a derivative block
+        if kinetic_block == "off" or self._custom_dynamics:
+            # Represent the reaction in a derivative block. custom_dynamics
+            # reactions supply their rate directly (it is not a mass-action
+            # scheme), so they always use the derivative form -- only true
+            # mass-action reactions are emitted as a kinetic block.
             rates = []
 
             for idx, sptr in enumerate(self._sources + self._dests):
@@ -504,8 +505,13 @@ class MultiCompartmentReaction(GeneralizedReaction):
                 )
             return rates, species
         else:
-            # represent the reaction in a kinetic block
-            rast = self._scheme.ast()
+            # represent the reaction in a kinetic block; use_react_var=True emits
+            # ReactVarName (stoichiometry-tagged) reactants/products so that
+            # KineticBlockVisitor can derive the per-species d/dt (as the
+            # intracellular Reaction.ast does). Without it the visitor produces
+            # only the rate-constant LOCALs and no d/dt, and the compile path
+            # silently falls back to the legacy reaction builder.
+            rast = self._scheme.ast(use_react_var=True)
 
             # fill in the correct rates
             if ">" in self._dir:
